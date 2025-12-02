@@ -64,6 +64,15 @@ const SEED_REQUESTS: HelpRequest[] = [
   }
 ];
 
+// Helper para traduzir erros do Auth
+const translateAuthError = (message: string) => {
+    if (message.includes("Email signups are disabled")) return "ERRO DE CONFIGURAÇÃO: Vá no Supabase > Authentication > Providers > Email e ative 'Enable Email provider'.";
+    if (message.includes("User already registered")) return "Este e-mail já tem conta. Tente fazer login.";
+    if (message.includes("Invalid login credentials")) return "E-mail ou senha incorretos.";
+    if (message.includes("Password should be at least")) return "A senha deve ter pelo menos 6 caracteres.";
+    return `Erro: ${message}`;
+};
+
 // --- SERVIÇOS UNIFICADOS ---
 
 export const dbService = {
@@ -83,7 +92,13 @@ export const dbService = {
       const authUser = response.user || response.data?.user;
       const authError = response.error;
 
-      if (authError) return { user: null, error: authError.message };
+      if (authError) return { user: null, error: translateAuthError(authError.message) };
+      
+      // Verifica se o usuário foi criado mas está pendente de confirmação
+      if (authUser && !response.session && !response.data?.session) {
+          return { user: null, error: "Conta criada! Vá no Supabase > Providers > Email e desligue 'Confirm Email' para entrar direto." };
+      }
+
       if (!authUser) return { user: null, error: "Erro ao criar conta." };
 
       // 2. Prepara dados do perfil público
@@ -102,6 +117,7 @@ export const dbService = {
       
       if (dbError) {
           console.error("Erro ao salvar perfil:", dbError);
+          // Mesmo se falhar o perfil, tenta logar
       }
 
       // Salva sessão localmente para persistência rápida
@@ -109,7 +125,7 @@ export const dbService = {
       return { user: newUser, error: null };
 
     } catch (e: any) {
-      return { user: null, error: e.message || "Erro desconhecido" };
+      return { user: null, error: translateAuthError(e.message) || "Erro desconhecido" };
     }
   },
 
@@ -128,7 +144,7 @@ export const dbService = {
       const authUser = response.user || response.data?.user;
       const authError = response.error;
 
-      if (authError) return { user: null, error: "E-mail ou senha incorretos." };
+      if (authError) return { user: null, error: translateAuthError(authError.message) };
       if (!authUser) return { user: null, error: "Erro no login." };
 
       // 2. Busca dados do perfil na tabela pública
@@ -139,7 +155,19 @@ export const dbService = {
         .single();
 
       if (profileError || !profileData) {
-         return { user: null, error: "Perfil não encontrado. Tente criar conta novamente." };
+          // Se o login funcionou mas não tem perfil, cria um na hora (recuperação)
+          const recoveryUser: User = {
+            id: authUser.id,
+            email: email,
+            name: 'Vizinho Recuperado',
+            avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${authUser.id}`,
+            location: { neighborhood: '', city: '', state: '', country: 'Brasil' },
+            distance: '0m',
+            reputation: { reliability: 5.0, speed: 5.0, kindness: 5.0, totalFavors: 0 }
+          };
+          await supabase.from('users').insert(recoveryUser);
+          localStorage.setItem('liga_user', JSON.stringify(recoveryUser));
+          return { user: recoveryUser, error: null };
       }
 
       const user = profileData as User;
@@ -147,7 +175,7 @@ export const dbService = {
       return { user, error: null };
 
     } catch (e: any) {
-      return { user: null, error: e.message };
+      return { user: null, error: translateAuthError(e.message) };
     }
   },
 
