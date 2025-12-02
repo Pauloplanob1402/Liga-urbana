@@ -172,7 +172,7 @@ export default function App() {
           const { user: registeredUser, error } = await dbService.registerUser(loginEmail, loginPassword, newUserProfile);
 
           if (error) {
-              triggerToast(`Erro ao criar conta: ${error}`);
+              triggerToast(`${error}`);
               setIsAuthLoading(false);
           } else if (registeredUser) {
               setUser(registeredUser);
@@ -200,7 +200,7 @@ export default function App() {
   const triggerToast = (msg: string) => {
     setToastMessage(msg);
     setShowToast(true);
-    setTimeout(() => setShowToast(false), 4000);
+    setTimeout(() => setShowToast(false), 6000); // 6 segundos para dar tempo de ler mensagens de erro
   };
 
   const sendPushNotification = (title: string, body: string) => {
