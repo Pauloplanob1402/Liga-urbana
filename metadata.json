@@ -1,0 +1,7 @@
+{
+  "name": "Liga Urbana",
+  "description": "Uma rede social hiper-local focada em microajudas, trocas de favores e conexão comunitária real.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
