@@ -4,13 +4,17 @@ import { RequestCard } from './components/RequestCard';
 import { AppScreen, HelpRequest, RequestType, User, AppNotification } from './types';
 import { enhanceRequestContent, generateCommunityTip } from './services/geminiService';
 import { dbService, isOnlineMode } from './services/databaseService';
-import { MapPin, Bell, Shield, Heart, Zap, Loader2, Sparkles, Send, Award, ArrowRight, User as UserIcon, Share2, Users, CheckCircle2, CloudOff, CloudLightning, Filter, Home, Globe, Map, Copy } from 'lucide-react';
+import { MapPin, Bell, Shield, Heart, Zap, Loader2, Sparkles, Send, Award, ArrowRight, User as UserIcon, Share2, Users, CheckCircle2, CloudOff, CloudLightning, Filter, Home, Globe, Map, Copy, Lock, Mail } from 'lucide-react';
 
 export default function App() {
   // --- STATE MANAGEMENT ---
   const [user, setUser] = useState<User | null>(null);
   
-  // Onboarding States
+  // Auth & Onboarding States
+  const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  
   const [onboardingName, setOnboardingName] = useState('');
   const [onboardingHood, setOnboardingHood] = useState('');
   const [onboardingCity, setOnboardingCity] = useState('');
@@ -22,7 +26,7 @@ export default function App() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [isLoadingRequests, setIsLoadingRequests] = useState(false);
-  const [isLoginLoading, setIsLoginLoading] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   // Filters - Hierarchy: Country -> State -> City -> Hood
   const [filterScope, setFilterScope] = useState<'GLOBAL' | 'STATE' | 'CITY' | 'HOOD'>('GLOBAL');
@@ -46,13 +50,13 @@ export default function App() {
     // Check if user has the new location structure. If not, force re-login/update.
     if (savedUser && savedUser.location) {
       setUser(savedUser);
-      setOnboardingHood(savedUser.location.neighborhood);
-      setOnboardingCity(savedUser.location.city);
-      setOnboardingState(savedUser.location.state);
-      // Se tiver usuário, foca na cidade dele
+      // Se tiver usuário, foca na cidade dele e mostra o Feed
       setFilterScope('CITY');
+      setScreen(AppScreen.FEED); 
     } else {
         if(savedUser) dbService.clearLocal();
+        // MUDANÇA CRÍTICA: Se não tem usuário, força a tela de Login/Cadastro imediatamente
+        setScreen(AppScreen.PROFILE);
     }
     
     // 2. Load Requests
@@ -126,42 +130,71 @@ export default function App() {
     }
   };
 
-  const handleLogin = async () => {
-    if (!onboardingName.trim() || !onboardingHood.trim() || !onboardingCity.trim()) return;
-    setIsLoginLoading(true);
-    
-    const uniqueId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const handleAuth = async () => {
+      setIsAuthLoading(true);
+      
+      if (authMode === 'LOGIN') {
+          if (!loginEmail || !loginPassword) {
+              triggerToast('Preencha e-mail e senha.');
+              setIsAuthLoading(false);
+              return;
+          }
+          const { user: loggedUser, error } = await dbService.loginUser(loginEmail, loginPassword);
+          
+          if (error) {
+              triggerToast(`Erro: ${error}`);
+              setIsAuthLoading(false);
+          } else if (loggedUser) {
+              setUser(loggedUser);
+              setFilterScope('CITY');
+              setScreen(AppScreen.FEED); // Manda pro feed ao logar
+              setIsAuthLoading(false);
+              requestNotifyPermission();
+          }
+      } else {
+          // REGISTER
+          if (!loginEmail || !loginPassword || !onboardingName || !onboardingCity) {
+              triggerToast('Preencha todos os campos obrigatórios.');
+              setIsAuthLoading(false);
+              return;
+          }
 
-    const newUser: User = {
-      id: uniqueId,
-      name: onboardingName,
-      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${uniqueId}`,
-      location: {
-          neighborhood: onboardingHood,
-          city: onboardingCity,
-          state: onboardingState || 'BR',
-          country: 'Brasil'
-      },
-      distance: '0m',
-      reputation: { reliability: 5.0, speed: 5.0, kindness: 5.0, totalFavors: 0 }
-    };
-    
-    await dbService.saveUser(newUser);
-    setUser(newUser);
-    setFilterScope('CITY'); // Switch view to local
-    setIsLoginLoading(false);
-    requestNotifyPermission();
+          const newUserProfile: Partial<User> = {
+              name: onboardingName,
+              location: {
+                  neighborhood: onboardingHood,
+                  city: onboardingCity,
+                  state: onboardingState || 'BR',
+                  country: 'Brasil'
+              }
+          };
+
+          const { user: registeredUser, error } = await dbService.registerUser(loginEmail, loginPassword, newUserProfile);
+
+          if (error) {
+              triggerToast(`Erro ao criar conta: ${error}`);
+              setIsAuthLoading(false);
+          } else if (registeredUser) {
+              setUser(registeredUser);
+              setFilterScope('CITY');
+              setScreen(AppScreen.FEED); // Manda pro feed ao registrar
+              setIsAuthLoading(false);
+              triggerToast('Conta criada com sucesso!');
+              requestNotifyPermission();
+          }
+      }
   };
 
-  const handleLogout = () => {
-      dbService.clearLocal();
+  const handleLogout = async () => {
+      await dbService.logout();
       setUser(null);
       setRequests([]);
+      
+      // Reset Auth Forms
+      setLoginEmail('');
+      setLoginPassword('');
       setOnboardingName('');
-      setOnboardingHood('');
-      setOnboardingCity('');
-      setOnboardingState('');
-      setScreen(AppScreen.FEED); // Volta pro inicio
+      setScreen(AppScreen.PROFILE); // Volta pro login ao sair
   };
 
   const triggerToast = (msg: string) => {
@@ -187,7 +220,7 @@ export default function App() {
   const handleOfferHelp = async (requestId: string) => {
     if (!user) {
         setScreen(AppScreen.CREATE); // Redirect to login/register flow
-        triggerToast("Cadastre-se rapidinho para oferecer ajuda!");
+        triggerToast("Entre ou cadastre-se para oferecer ajuda!");
         return;
     }
     const request = requests.find(r => r.id === requestId);
@@ -290,75 +323,124 @@ export default function App() {
   };
 
   const renderRegistration = () => (
-    <div className="pb-32 pt-4 px-4 min-h-full flex flex-col items-center justify-center animate-in fade-in duration-500">
-        <div className="w-20 h-20 bg-teal-100 rounded-full flex items-center justify-center mb-6">
-          <Heart className="w-10 h-10 text-teal-600" fill="currentColor" />
+    <div className="pb-32 pt-10 px-6 min-h-full flex flex-col items-center justify-center animate-in fade-in duration-500 bg-white">
+        {/* LOGO E SLOGAN EMOCIONAL */}
+        <div className="flex flex-col items-center mb-8">
+            <div className="relative mb-4">
+                <div className="w-20 h-20 bg-gradient-to-tr from-teal-400 to-teal-600 rounded-3xl rotate-3 flex items-center justify-center shadow-lg shadow-teal-200">
+                    <Heart className="w-10 h-10 text-white" fill="currentColor" />
+                </div>
+                <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center border-2 border-slate-50 shadow-sm">
+                    <MapPin className="w-4 h-4 text-rose-500" />
+                </div>
+            </div>
+            
+            <h1 className="text-3xl font-black text-slate-800 tracking-tight mb-2">Liga Urbana</h1>
+            <p className="text-slate-500 text-center font-medium max-w-[280px] leading-relaxed">
+                "Não limitados pela geografia, conectados pelo coração."
+            </p>
         </div>
-        <h2 className="text-2xl font-bold text-slate-800 mb-2 text-center">Vamos criar seu perfil</h2>
-        <p className="text-slate-500 mb-8 max-w-[260px] text-center text-sm">Para fazer um pedido ou oferecer ajuda, a comunidade precisa saber quem você é e onde está.</p>
 
-        <div className="w-full max-w-sm space-y-4">
-          <div className="text-left">
-            <label className="text-xs font-bold text-slate-700 uppercase ml-1">Seu Nome</label>
-            <input 
-              type="text" 
-              value={onboardingName}
-              onChange={(e) => setOnboardingName(e.target.value)}
-              placeholder="Ex: Ana Silva"
-              className="w-full p-4 bg-white border-2 border-slate-100 rounded-2xl focus:border-teal-500 focus:outline-none transition-colors font-semibold text-slate-800"
-            />
-          </div>
-          <div className="text-left">
-            <label className="text-xs font-bold text-slate-700 uppercase ml-1">Bairro</label>
-            <input 
-              type="text" 
-              value={onboardingHood}
-              onChange={(e) => setOnboardingHood(e.target.value)}
-              placeholder="Ex: Vila Madalena"
-              className="w-full p-4 bg-white border-2 border-slate-100 rounded-2xl focus:border-teal-500 focus:outline-none transition-colors font-semibold text-slate-800"
-            />
-          </div>
-          <div className="flex gap-3">
-            <div className="text-left flex-[2]">
-                <label className="text-xs font-bold text-slate-700 uppercase ml-1">Cidade</label>
-                <input 
-                type="text" 
-                value={onboardingCity}
-                onChange={(e) => setOnboardingCity(e.target.value)}
-                placeholder="Ex: São Paulo"
-                className="w-full p-4 bg-white border-2 border-slate-100 rounded-2xl focus:border-teal-500 focus:outline-none transition-colors font-semibold text-slate-800"
-                />
-            </div>
-            <div className="text-left flex-1">
-                <label className="text-xs font-bold text-slate-700 uppercase ml-1">UF</label>
-                <input 
-                type="text" 
-                value={onboardingState}
-                onChange={(e) => setOnboardingState(e.target.value.toUpperCase())}
-                placeholder="SP"
-                maxLength={2}
-                className="w-full p-4 bg-white border-2 border-slate-100 rounded-2xl focus:border-teal-500 focus:outline-none transition-colors font-semibold text-slate-800 text-center"
-                />
-            </div>
-          </div>
-        </div>
-        <div className="mt-8 pt-2 w-full max-w-sm">
+        {/* Abas de Navegação Auth */}
+        <div className="flex bg-slate-50 p-1 rounded-xl w-full max-w-sm mb-6 border border-slate-100">
             <button 
-            onClick={handleLogin}
-            disabled={!onboardingName || !onboardingHood || !onboardingCity || isLoginLoading}
-            className={`w-full py-4 rounded-2xl font-bold text-lg shadow-xl transition-all flex items-center justify-center gap-2 ${
-                (onboardingName && onboardingHood && onboardingCity) ? 'bg-slate-900 text-white translate-y-0' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-            }`}
+                onClick={() => setAuthMode('LOGIN')}
+                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${authMode === 'LOGIN' ? 'bg-white text-slate-800 shadow-sm border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
             >
-            {isLoginLoading ? <Loader2 className="animate-spin" /> : 'Salvar e Continuar'}
+                Entrar
             </button>
+            <button 
+                onClick={() => setAuthMode('REGISTER')}
+                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${authMode === 'REGISTER' ? 'bg-white text-slate-800 shadow-sm border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+                Criar Conta
+            </button>
+        </div>
+
+        <div className="w-full max-w-sm space-y-3">
+            {/* Campos comuns: Email e Senha */}
+            <div className="relative group">
+                <Mail className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-teal-500 transition-colors" size={18} />
+                <input 
+                    type="email" 
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="Seu E-mail"
+                    className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none transition-all text-slate-800 placeholder:text-slate-400"
+                />
+            </div>
+            <div className="relative group">
+                <Lock className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-teal-500 transition-colors" size={18} />
+                <input 
+                    type="password" 
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="Sua Senha"
+                    className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none transition-all text-slate-800 placeholder:text-slate-400"
+                />
+            </div>
+
+            {/* Campos extras para Cadastro */}
+            {authMode === 'REGISTER' && (
+                <div className="space-y-3 pt-2 animate-in slide-in-from-top-2">
+                     <div className="relative group">
+                        <UserIcon className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-teal-500 transition-colors" size={18} />
+                        <input 
+                            type="text" 
+                            value={onboardingName}
+                            onChange={(e) => setOnboardingName(e.target.value)}
+                            placeholder="Seu Nome Completo"
+                            className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-teal-500 outline-none transition-all text-slate-800"
+                        />
+                    </div>
+                    <div className="flex gap-2">
+                        <input 
+                            type="text" 
+                            value={onboardingCity}
+                            onChange={(e) => setOnboardingCity(e.target.value)}
+                            placeholder="Cidade"
+                            className="flex-[2] px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-teal-500 outline-none transition-all text-slate-800"
+                        />
+                        <input 
+                            type="text" 
+                            value={onboardingState}
+                            onChange={(e) => setOnboardingState(e.target.value.toUpperCase())}
+                            placeholder="UF"
+                            maxLength={2}
+                            className="flex-1 px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-teal-500 outline-none transition-all text-slate-800 text-center"
+                        />
+                    </div>
+                     <input 
+                        type="text" 
+                        value={onboardingHood}
+                        onChange={(e) => setOnboardingHood(e.target.value)}
+                        placeholder="Bairro"
+                        className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-teal-500 outline-none transition-all text-slate-800"
+                    />
+                </div>
+            )}
+        </div>
+
+        <div className="mt-8 w-full max-w-sm">
+            <button 
+                onClick={handleAuth}
+                disabled={isAuthLoading}
+                className="w-full py-4 rounded-xl font-bold text-white bg-slate-900 shadow-xl shadow-slate-200 active:scale-95 transition-all flex items-center justify-center gap-2 hover:bg-slate-800 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+                {isAuthLoading ? <Loader2 className="animate-spin" /> : (authMode === 'LOGIN' ? 'Entrar na Liga' : 'Juntar-se à Comunidade')}
+            </button>
+            {authMode === 'REGISTER' && (
+                <p className="text-[10px] text-center text-slate-400 mt-4 px-4 leading-tight">
+                    Ao criar sua conta, você aceita fazer parte de uma rede baseada em confiança, respeito e colaboração mútua.
+                </p>
+            )}
       </div>
     </div>
   );
 
   const renderFeed = () => {
     const userLoc = user?.location;
-    const locString = userLoc ? `${userLoc.neighborhood} - ${userLoc.city}` : 'Brasil (Visitante)';
+    const locString = userLoc ? `${userLoc.neighborhood} - ${userLoc.city}` : 'Brasil';
 
     // --- FILTER LOGIC (Revised) ---
     const filteredRequests = requests.filter(req => {
@@ -390,23 +472,26 @@ export default function App() {
 
     return (
     <div className="pb-32 pt-4 px-4 min-h-full">
-      <div className="flex justify-between items-center mb-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">
-             {user ? `Olá, ${user.name.split(' ')[0]}!` : 'Olá, Vizinho!'}
-          </h1>
-          <p className="text-xs text-slate-500 flex items-center gap-1"><MapPin size={12} /> {locString}</p>
-        </div>
+      {/* HEADER AMIGÁVEL - SEM TECNICÊS */}
+      <div className="flex justify-between items-center mb-4 pt-2">
         <div className="flex items-center gap-2">
-            <div className={`px-2 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 border ${isOnlineMode() ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                {isOnlineMode() ? <CloudLightning size={10} /> : <CloudOff size={10} />}
-                {isOnlineMode() ? 'ONLINE' : 'OFFLINE'}
-            </div>
-            <button onClick={requestNotifyPermission} className={`relative p-2 rounded-full shadow-sm transition-colors ${notificationPermission === 'granted' ? 'bg-teal-50 text-teal-600' : 'bg-white text-slate-600'}`}>
-                <Bell size={20} />
-                {notificationPermission === 'granted' && <span className="absolute top-2 right-2.5 w-2 h-2 bg-teal-500 rounded-full"></span>}
-            </button>
+           <div className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center">
+             <Heart className="w-4 h-4 text-teal-600" fill="currentColor" />
+           </div>
+           <div>
+            <h1 className="text-lg font-extrabold text-slate-800 leading-none">
+                {user ? `Olá, ${user.name.split(' ')[0]}!` : 'Liga Urbana'}
+            </h1>
+            <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                <MapPin size={10} /> {locString}
+            </p>
+           </div>
         </div>
+
+        <button onClick={requestNotifyPermission} className={`relative p-2 rounded-full shadow-sm transition-colors border ${notificationPermission === 'granted' ? 'bg-teal-50 text-teal-600 border-teal-100' : 'bg-white text-slate-400 border-slate-100'}`}>
+            <Bell size={20} />
+            {notificationPermission === 'granted' && <span className="absolute top-2 right-2.5 w-2 h-2 bg-teal-500 rounded-full border border-white"></span>}
+        </button>
       </div>
 
       {/* FILTER BAR - Hierarchy */}
@@ -543,15 +628,9 @@ export default function App() {
                 </div>
                 <h2 className="text-xl font-bold text-slate-800">{user.name}</h2>
                 <p className="text-sm text-slate-500 flex items-center gap-1"><MapPin size={12} /> {user.location.neighborhood}, {user.location.city}</p>
+                {user.email && <p className="text-xs text-slate-400 mt-1">{user.email}</p>}
             </div>
         )}
-        <div className={`mb-8 p-4 rounded-2xl border flex items-center gap-3 ${isOnlineMode() ? 'bg-green-50 border-green-200' : 'bg-slate-100 border-slate-200'}`}>
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isOnlineMode() ? 'bg-green-100 text-green-600' : 'bg-slate-200 text-slate-500'}`}>{isOnlineMode() ? <CloudLightning size={20} /> : <CloudOff size={20} />}</div>
-            <div className="flex-1">
-                <h4 className="font-bold text-sm text-slate-800">{isOnlineMode() ? 'Online' : 'Demo Local'}</h4>
-                <p className="text-xs text-slate-500">{isOnlineMode() ? 'Conectado à comunidade real.' : 'Dados salvos apenas neste aparelho.'}</p>
-            </div>
-        </div>
         <div className="grid grid-cols-3 gap-3 mb-8">
             <div className="bg-white p-3 rounded-2xl border border-slate-100 text-center shadow-sm"><p className="text-xs text-slate-400 font-bold uppercase mb-1">Favores</p><p className="text-xl font-black text-slate-800">{user?.reputation.totalFavors || 0}</p></div>
             <div className="bg-white p-3 rounded-2xl border border-slate-100 text-center shadow-sm"><p className="text-xs text-slate-400 font-bold uppercase mb-1">Gentileza</p><p className="text-xl font-black text-amber-500">{user?.reputation.kindness || 5.0}</p></div>
