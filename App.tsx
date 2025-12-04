@@ -282,10 +282,10 @@ export default function App() {
   };
 
   const renderRegistration = () => (
-    <div className="pb-10 pt-10 px-6 min-h-screen flex flex-col items-center justify-between animate-in fade-in duration-500 bg-white">
+    <div className="py-10 px-6 min-h-[100dvh] flex flex-col items-center animate-in fade-in duration-500 bg-white">
         
-        {/* Main Content Wrapper - Centralizado verticalmente */}
-        <div className="w-full max-w-sm flex flex-col items-center justify-center flex-1">
+        {/* Main Content Wrapper - Centralizado verticalmente se possível */}
+        <div className="w-full max-w-sm flex flex-col items-center justify-center flex-grow">
             {/* LOGO E SLOGAN EMOCIONAL */}
             <div className="flex flex-col items-center mb-8">
                 <div className="relative mb-4">
@@ -303,13 +303,13 @@ export default function App() {
                 </p>
             </div>
 
-            <div className="w-full max-w-sm space-y-3">
+            <div className="w-full max-w-sm space-y-4">
                 <div className="text-center mb-4">
                     <h2 className="text-lg font-bold text-slate-700">Vamos criar seu perfil</h2>
                     <p className="text-xs text-slate-400">Simples e rápido. Sem senhas.</p>
                 </div>
 
-                <div className="relative group">
+                <div className="relative group w-full">
                     <UserIcon className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-teal-500 transition-colors" size={18} />
                     <input 
                         type="text" 
@@ -319,7 +319,8 @@ export default function App() {
                         className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-teal-500 outline-none transition-all text-slate-800"
                     />
                 </div>
-                <div className="flex gap-2">
+                
+                <div className="flex w-full gap-3">
                     <input 
                         type="text" 
                         value={onboardingCity}
@@ -333,9 +334,10 @@ export default function App() {
                         onChange={(e) => setOnboardingState(e.target.value.toUpperCase())}
                         placeholder="UF"
                         maxLength={2}
-                        className="flex-1 px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-teal-500 outline-none transition-all text-slate-800 text-center"
+                        className="w-20 px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-teal-500 outline-none transition-all text-slate-800 text-center"
                     />
                 </div>
+                
                 <input 
                     type="text" 
                     value={onboardingHood}
@@ -356,9 +358,9 @@ export default function App() {
             </div>
         </div>
 
-        {/* Footer PLANO B */}
-        <div className="w-full max-w-sm flex justify-between items-center text-[10px] text-slate-300 font-mono mt-8 pt-4 border-t border-slate-50">
-            <span className="font-bold tracking-widest italic font-serif">LIGA URBANA</span>
+        {/* Footer PLANO B - Fixo no rodapé visual */}
+        <div className="w-full max-w-sm flex justify-between items-center text-[10px] text-slate-300 font-mono mt-8 pt-6 border-t border-slate-50">
+            <span className="font-bold tracking-widest italic font-serif text-slate-400">LIGA URBANA</span>
             <span>Manifesto Criativo v2.5 - <span className="text-amber-500 font-bold">Plano B</span></span>
         </div>
     </div>
